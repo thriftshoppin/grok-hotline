@@ -60,7 +60,7 @@ BUILTIN_TOOLS = frozenset({
 ALLOWED_TOOLS = EDEN_TOOLS | BUILTIN_TOOLS
 AUDIO_SESSION_ACTIONS = frozenset({"status", "check"})
 
-DEFAULT_EDEN_ROOT = r"C:\Users\SysAdmin\tools\eden-desktop-bridge"
+DEFAULT_EDEN_ROOT = os.path.join(os.path.expanduser("~"), "tools", "eden-desktop-bridge")
 SESSION_DIR_NAME = "grok-hotline"
 POLL_TIMEOUT_S = 25
 EDEN_REPLY_TIMEOUT_S = 90
