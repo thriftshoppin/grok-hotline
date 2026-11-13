@@ -1,0 +1,19 @@
+# Secrets and session state — never commit
+mcp.token
+pair.code
+HOTLINE.txt
+python_path.txt
+*.token
+
+# Runtime
+logs/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.out
+*.pid
+
+# Local kits
+*.zip
