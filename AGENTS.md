@@ -28,8 +28,10 @@ user gives you one in this conversation.
    You may *run* the bridge's `python.exe`. You may not change it.
 3. Do **not** open any network listeners or ports. The client only makes
    outbound connections.
-4. Never print, log, or commit tokens, pairing codes, passwords, or
-   secrets.
+4. Never print, log, or commit tokens, passwords, the `grok dial` address,
+   or other secrets. The Eden display code (`AB2-CD3`) is meant to be shown
+   in the hotline window so the user can compare it with Eden's feed; do
+   not put it in git or in a chat log.
 5. Eden is the gate: the hotline passes every Eden tool through and Eden's approval prompt and kill switch decide (`grok dial --read-only` restricts to scan tools; see README). Do not
    modify Eden or its approval settings.
 6. Do **not** run `grok dial` unless the user has supplied a session
@@ -175,6 +177,26 @@ created. Fix the cause and re-run. Do not copy files by hand unless
 folder to the *user* PATH with PowerShell as above — never with a raw
 `setx PATH "%PATH%;..."`.
 
+
+## Eden pairing code (when this branch is in use)
+
+If Eden is installed, `grok dial` prints a one-time code in the hotline
+window (`Eden will show code AB2-CD3 — press y only if it matches`) and
+passes it to the launcher as the `EDEN_PAIR_CODE` environment variable. Do
+not hide that line. If the user is also running the `pairing-code-gate`
+branch of eden-desktop-bridge, tell them to compare that code with the
+feed window and press `y` only if they match.
+
+Do **not** modify Eden or check out a branch of it unless the user asked
+you to. If they did, a `git fetch` / `git checkout` of the named branch
+in `%USERPROFILE%\tools\eden-desktop-bridge` is enough; do not change
+its venv, and do not merge to main. Then they need to close Eden's feed
+window so the guardian restarts with the new code, re-run `install.cmd`
+for this repo, and dial again.
+
+If Eden is still on `main`, the code is printed anyway and then ignored
+by Eden; that is fine, do not treat it as a failure.
+
 ## What to report back
 
 Tell the user, in plain language:
@@ -187,6 +209,8 @@ Tell the user, in plain language:
    `%USERPROFILE%\tools\grok\python_path.txt`.
 4. Whether Eden was detected as present on disk, or that the built-in
    tools will be used if it is not. Do not start a call just to find out.
+   If they already dialed and Eden is in use, mention that a pairing code
+   was shown in the hotline window (do not repeat the code itself).
 5. Anything you had to work around (PATH, a manual `--python` /
    `GROK_PYTHON` path).
 6. That the deck is ready for `grok dial <address>` once the user (or
