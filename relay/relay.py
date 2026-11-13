@@ -40,7 +40,8 @@ LOG_DIR = DIR / "logs"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 18765
 PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-DECK_STALE_S = 90
+DECK_STALE_S = 120
+HEARTBEAT_S = 30
 FORWARD_TIMEOUT_S = 90
 WAIT_FOR_DECK_S = 25
 POLL_MAX_S = 25
@@ -362,7 +363,8 @@ async def handle_deck_connect(request: web.Request) -> web.Response:
     hotline.bad_pair_count = 0
     async with hotline._lock:
         if hotline.deck_is_live():
-            return json_error(409, "a deck is already on this hotline; hang up first")
+            # The caller proved the pairing code, so a re-dial replaces the old line.
+            log.info("Deck re-dialed; replacing the old session")
         hotline._drop_deck("replaced")
         hotline.deck_token = secrets.token_urlsafe(24)
         hotline.deck_connected = True
@@ -409,6 +411,14 @@ async def handle_deck_poll(request: web.Request) -> web.Response:
                 break
     except asyncio.TimeoutError:
         pass
+    # If this poll's session was replaced while it waited, hand the messages
+    # back to the queue for the new deck instead of losing them.
+    if hotline.deck_token is None or bearer(request) not in ("", hotline.deck_token) or (
+        not bearer(request) and str(body.get("deck_token") or "") != hotline.deck_token
+    ):
+        for m in messages:
+            hotline.deck_queue.put_nowait(m)
+        return json_error(401, "unauthorized deck session")
     return web.json_response({"ok": True, "messages": messages})
 
 
@@ -445,8 +455,39 @@ async def handle_deck_hangup(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+async def heartbeat_loop() -> None:
+    """Ping the deck every HEARTBEAT_S so the line never goes idle."""
+    n = 0
+    misses = 0
+    while True:
+        await asyncio.sleep(HEARTBEAT_S)
+        if not hotline.deck_is_live():
+            misses = 0
+            continue
+        n += 1
+        hb_id = "hb-%d" % n
+        fut = asyncio.get_running_loop().create_future()
+        hotline.pending[hb_id] = fut
+        await hotline.deck_queue.put({"jsonrpc": "2.0", "id": hb_id, "method": "ping"})
+        try:
+            await asyncio.wait_for(fut, timeout=HEARTBEAT_S)
+            if misses:
+                log.info("Heartbeat back after %d miss(es)", misses)
+            misses = 0
+        except Exception:
+            misses += 1
+            log.warning("Heartbeat %s missed (%d in a row)", hb_id, misses)
+        finally:
+            hotline.pending.pop(hb_id, None)
+
+
+async def _start_heartbeat(app: web.Application) -> None:
+    app["heartbeat"] = asyncio.create_task(heartbeat_loop())
+
+
 def build_app() -> web.Application:
     app = web.Application()
+    app.on_startup.append(_start_heartbeat)
     app.router.add_get("/health", handle_health)
     app.router.add_post("/mcp", handle_mcp_post)
     app.router.add_get("/mcp", handle_mcp_get)
@@ -559,7 +600,12 @@ async def main_async(argv: Optional[list[str]] = None) -> int:
 
     setup_logging()
     token = load_or_create_token()
-    pair_code = new_pair_code()
+    # Keep the same pairing code across relay restarts so a dialed deck can redial.
+    pair_code = ""
+    if PAIR_PATH.exists() and not os.environ.get("HOTLINE_NEW_CODE"):
+        pair_code = PAIR_PATH.read_text(encoding="utf-8").strip().upper()
+    if not pair_code:
+        pair_code = new_pair_code()
     hotline = Hotline(token, pair_code)
     log.info("Relay starting on %s:%s (token file %s, pairing code written to %s)",
              args.host, args.port, TOKEN_PATH, PAIR_PATH)

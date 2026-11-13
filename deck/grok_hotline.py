@@ -1016,6 +1016,9 @@ def process_message(handler, msg: dict) -> Optional[dict]:
     method = msg.get("method")
     req_id = msg.get("id")
     is_request = "id" in msg and method
+    if method == "ping":
+        # Heartbeat from the relay; answer here so Eden is not bothered.
+        return {"jsonrpc": "2.0", "id": req_id, "result": {}} if "id" in msg else None
     if method == "tools/call":
         params = msg.get("params") or {}
         name = params.get("name") if isinstance(params, dict) else None
@@ -1185,6 +1188,7 @@ def cmd_dial(args: argparse.Namespace) -> int:
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, handle_sig)
 
+    net_fail = {"n": 0}
     try:
         while True:
             if isinstance(handler, EdenStdio) and handler.proc and handler.proc.poll() is not None:
@@ -1197,17 +1201,52 @@ def cmd_dial(args: argparse.Namespace) -> int:
                     token=deck_token,
                     timeout=POLL_TIMEOUT_S + 10,
                 )
-            except ConnectionError as e:
-                log("Poll error: %s. Retrying in 2s..." % e)
-                time.sleep(2)
+            except Exception as e:  # network blips, TLS resets, read timeouts
+                backoff = min(15, 2 + net_fail["n"] * 2)
+                net_fail["n"] += 1
+                log("Line crackled (%s: %s). Retrying in %ss..." % (type(e).__name__, e, backoff))
+                time.sleep(backoff)
                 continue
-            if status in (401, 409):
-                log("Session ended by relay HTTP %s: %s" % (status, body))
+            if status == 401:
+                log("Another dial took over this hotline, so this window is hanging up.")
                 return 6
+            if status == 409:
+                log("Relay dropped the session (it may have restarted). Redialing...")
+                new_token = None
+                for attempt in range(1, 31):
+                    try:
+                        cst, cbody = http_json(base + "/deck/connect", {"code": code}, timeout=CONNECT_TIMEOUT_S)
+                    except Exception as e:
+                        cst, cbody = None, "%s: %s" % (type(e).__name__, e)
+                    if cst == 200 and isinstance(cbody, dict) and cbody.get("deck_token"):
+                        new_token = cbody["deck_token"]
+                        break
+                    if cst == 401:
+                        log("Pairing code no longer accepted. Ask Grok for a new address.")
+                        return 6
+                    log("Redial attempt %s failed (%s). Retrying in 5s..." % (attempt, cbody))
+                    time.sleep(5)
+                if not new_token:
+                    log("Could not get back on the line.")
+                    return 6
+                deck_token = new_token
+                write_session({
+                    "pid": os.getpid(),
+                    "launcher_pid": launcher_pid,
+                    "base": base,
+                    "deck_token": deck_token,
+                    "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "mode": "eden" if isinstance(handler, EdenStdio) else "builtin",
+                })
+                log("Back on the line.")
+                continue
             if status != 200 or not isinstance(body, dict):
                 log("Poll HTTP %s: %s. Retrying in 2s..." % (status, body))
                 time.sleep(2)
                 continue
+            if net_fail["n"]:
+                log("Line is clear again.")
+                net_fail["n"] = 0
             messages = body.get("messages") or []
             replies = []
             for msg in messages:
@@ -1224,8 +1263,8 @@ def cmd_dial(args: argparse.Namespace) -> int:
                     )
                     if rstatus != 200:
                         log("Reply POST HTTP %s: %s" % (rstatus, rbody))
-                except ConnectionError as e:
-                    log("Reply POST failed: %s" % e)
+                except Exception as e:
+                    log("Reply POST failed: %s: %s" % (type(e).__name__, e))
     except SystemExit:
         raise
     except Exception:
