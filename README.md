@@ -1,6 +1,6 @@
 # Grok Hotline
 
-A small Windows client that dials Grok Bot for a read-only scan session.
+A small Windows client that dials Grok Bot and hands it your Eden desktop bridge for the session.
 
 The public HTTPS endpoint runs on Grok Bot's computer, not on the deck.
 The deck only dials out; it never opens a port. The client is two files
@@ -8,7 +8,7 @@ The deck only dials out; it never opens a port. The client is two files
 only (Python 3.8+, including 3.14).
 
 If the Eden desktop bridge is present, the client starts it and proxies
-only the scan tools on the allowlist. If Eden is not installed, built-in
+every Eden tool, with Eden's approval and kill switch as the gate. If Eden is not installed, built-in
 read-only tools are used instead.
 
 Python does not need to be on PATH. `grok.cmd` will search the Python
@@ -62,7 +62,7 @@ into `%USERPROFILE%\\tools\\grok` so `python.exe` sits next to `grok.cmd`.
 
 ## Safety / allowlist
 
-This hotline is read-only. Clicking, typing, running programs, and file
+By default Eden is the gate (see below). With `--read-only`, clicking, typing, running programs, and file
 writes are refused on both the deck and the relay.
 
 When Eden is used, only these tools are allowed:
@@ -83,3 +83,13 @@ Everything else (including `desktop_run`) is rejected.
 
 The `relay/` folder is for the Linux box that hosts the public endpoint.
 You do not need it on the deck. See `relay/README.md`.
+
+## Eden is the gate
+
+By default the hotline passes every Eden tool through, including click, type,
+keys, scroll, window focus and launch. Eden decides: its one-time client
+approval and its kill switch (Esc twice, Ctrl+Alt+Pause, Ctrl+Alt+Shift+K)
+apply to Grok like any other client, and Ctrl+C in the hotline window hangs up.
+`grok dial <address> --read-only` limits Grok to looking (screenshots, windows,
+UI tree, audio levels, files).
+After `git pull`, run `install.cmd` again so the copy in `%USERPROFILE%\tools\grok` updates.

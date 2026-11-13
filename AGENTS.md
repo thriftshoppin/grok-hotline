@@ -30,9 +30,8 @@ user gives you one in this conversation.
    outbound connections.
 4. Never print, log, or commit tokens, pairing codes, passwords, or
    secrets.
-5. This hotline is read-only. Clicking, typing, running programs, and
-   file writes through the hotline are forbidden. Do not try to bypass
-   the allowlist.
+5. Eden is the gate: the hotline passes every Eden tool through and Eden's approval prompt and kill switch decide (`grok dial --read-only` restricts to scan tools; see README). Do not
+   modify Eden or its approval settings.
 6. Do **not** run `grok dial` unless the user has supplied a session
    address in this conversation. Installing and running `grok find-python`
    is enough until then.

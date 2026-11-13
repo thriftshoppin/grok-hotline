@@ -59,6 +59,10 @@ BUILTIN_TOOLS = frozenset({
 })
 ALLOWED_TOOLS = EDEN_TOOLS | BUILTIN_TOOLS
 AUDIO_SESSION_ACTIONS = frozenset({"status", "check"})
+# Eden is the gate: by default every Eden tool is passed through (click, type,
+# launch...) and Eden's own client approval and kill switch decide.
+# `grok dial --read-only` restores the scan-only allowlist.
+FULL_ACCESS = {"on": True}
 
 DEFAULT_EDEN_ROOT = os.path.join(os.path.expanduser("~"), "tools", "eden-desktop-bridge")
 SESSION_DIR_NAME = "grok-hotline"
@@ -76,11 +80,15 @@ def log(msg: str) -> None:
 
 
 def is_allowed_tool_name(name: Any) -> bool:
+    if FULL_ACCESS["on"]:
+        return True
     return str(name or "") in ALLOWED_TOOLS
 
 
 def is_allowed_call(name: Any, arguments: Any = None) -> bool:
     name = str(name or "")
+    if FULL_ACCESS["on"] and name:
+        return True
     if name not in ALLOWED_TOOLS:
         return False
     if name == "desktop_audio_session":
@@ -113,7 +121,7 @@ def refuse_payload(req_id: Any, name: Any) -> dict:
             "code": -32001,
             "message": (
                 "Tool '%s' is not allowed on this hotline. "
-                "This hotline is read-only / scan-only."
+                "This hotline was dialed with --read-only."
             ) % name,
             "data": {"tool": name, "allowed": sorted(ALLOWED_TOOLS)},
         },
@@ -1127,7 +1135,12 @@ def cmd_dial(args: argparse.Namespace) -> int:
         return 2
 
     log("Dialing %s ..." % base)
-    status, body = http_json(base + "/deck/connect", {"code": code}, timeout=CONNECT_TIMEOUT_S)
+    FULL_ACCESS["on"] = not bool(getattr(args, "read_only", False))
+    if FULL_ACCESS["on"]:
+        log("Full control: Eden is the gate. Esc twice in Eden (or Ctrl+Alt+Pause) stops Grok; Ctrl+C here hangs up.")
+    else:
+        log("Read-only mode: scan tools only.")
+    status, body = http_json(base + "/deck/connect", {"code": code, "full": FULL_ACCESS["on"]}, timeout=CONNECT_TIMEOUT_S)
     if status != 200 or not isinstance(body, dict) or not body.get("ok"):
         log("Pairing failed HTTP %s: %s" % (status, body if body is not None else "(no body)"))
         return 3
@@ -1142,7 +1155,7 @@ def cmd_dial(args: argparse.Namespace) -> int:
     launcher_pid = None
     if eden_info:
         root, python, launcher = eden_info
-        log("Eden found at %s — proxying with the read-only allowlist." % launcher)
+        log("Eden found at %s — proxying with %s." % (launcher, "FULL control" if FULL_ACCESS["on"] else "the read-only allowlist"))
         handler = EdenStdio(python, launcher, cwd=root)
         try:
             handler.start()
@@ -1215,7 +1228,7 @@ def cmd_dial(args: argparse.Namespace) -> int:
                 new_token = None
                 for attempt in range(1, 31):
                     try:
-                        cst, cbody = http_json(base + "/deck/connect", {"code": code}, timeout=CONNECT_TIMEOUT_S)
+                        cst, cbody = http_json(base + "/deck/connect", {"code": code, "full": FULL_ACCESS["on"]}, timeout=CONNECT_TIMEOUT_S)
                     except Exception as e:
                         cst, cbody = None, "%s: %s" % (type(e).__name__, e)
                     if cst == 200 and isinstance(cbody, dict) and cbody.get("deck_token"):
@@ -1290,6 +1303,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--eden-python", default=None, help="Python used to spawn the Eden launcher, if present")
     p.add_argument("--launcher", default=None, help="Path to launcher.py (optional)")
     p.add_argument("--builtin", action="store_true", help="Force built-in scan tools even if Eden exists")
+    p.add_argument("--read-only", dest="read_only", action="store_true", help="Scan-only: block click, type, keys and launch")
+    p.add_argument("--full", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--no-pause", action="store_true", help="Do not wait for Enter on exit")
     p.add_argument("-h", "--help", action="store_true")
     return p

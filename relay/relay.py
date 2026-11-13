@@ -107,6 +107,7 @@ class Hotline:
         self._lock = asyncio.Lock()
         self.deck_token: Optional[str] = None
         self.deck_connected = False
+        self.deck_full = False
         self.deck_last_seen = 0.0
         self.deck_queue: asyncio.Queue[dict] = asyncio.Queue()
         self.pending: dict[Any, asyncio.Future] = {}
@@ -217,6 +218,7 @@ async def handle_health(_request: web.Request) -> web.Response:
         "ok": True,
         "service": "grok-hotline",
         "deck_connected": hotline.deck_is_live(),
+        "deck_mode": ("full" if hotline.deck_full else "read-only") if hotline.deck_is_live() else None,
         "public": bool(hotline.public_base),
     })
 
@@ -267,7 +269,7 @@ async def handle_mcp_post(request: web.Request) -> web.Response:
             params = msg.get("params") or {}
             name = params.get("name") if isinstance(params, dict) else None
             args = params.get("arguments") if isinstance(params, dict) else None
-            if not is_allowed_call(name, args):
+            if not hotline.deck_full and not is_allowed_call(name, args):
                 log.info("Blocked tools/call name=%s args_action=%s", name, (args or {}).get("action") if isinstance(args, dict) else None)
                 replies.append(refuse_payload(req_id, name))
                 saw_request = True
@@ -276,7 +278,7 @@ async def handle_mcp_post(request: web.Request) -> web.Response:
         if is_request:
             saw_request = True
             reply = await hotline.forward_request(msg)
-            if method == "tools/list" and isinstance(reply, dict) and "result" in reply:
+            if method == "tools/list" and not hotline.deck_full and isinstance(reply, dict) and "result" in reply:
                 reply = dict(reply)
                 reply["result"] = filter_tools_list_result(reply.get("result"))
                 log.info(
@@ -368,8 +370,9 @@ async def handle_deck_connect(request: web.Request) -> web.Response:
         hotline._drop_deck("replaced")
         hotline.deck_token = secrets.token_urlsafe(24)
         hotline.deck_connected = True
+        hotline.deck_full = bool(body.get("full"))
         hotline.touch_deck()
-    log.info("Deck paired and on the line")
+    log.info("Deck paired and on the line (%s)", "FULL control" if hotline.deck_full else "read-only")
     return web.json_response({
         "ok": True,
         "deck_token": hotline.deck_token,
