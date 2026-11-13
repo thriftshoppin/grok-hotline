@@ -2,8 +2,10 @@
 # -*- coding: utf-8 -*-
 """Grok Hotline deck client — stdlib only, Python 3.8+.
 
-Dials OUT to the relay. If Eden is installed it is used (read-only
-allowlist). Otherwise a built-in scan tool set runs in-process.
+Dials OUT to the relay. If Eden is installed it is used, with Eden as the
+gate. A one-time pairing code is shown in this window so you can confirm
+it matches Eden's feed (older Eden builds ignore the code). Otherwise a
+built-in scan tool set runs in-process.
 
     grok dial <address>
     grok hangup
@@ -21,6 +23,7 @@ import base64
 import json
 import os
 import platform
+import secrets
 import shutil
 import signal
 import ssl
@@ -77,6 +80,22 @@ OUTPUT_CAP = 100000
 def log(msg: str) -> None:
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     print("%s %s" % (ts, msg), flush=True)
+
+
+
+# Shown in this window and passed to Eden as EDEN_PAIR_CODE. Not a secret token.
+EDEN_PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def new_eden_pair_code():
+    return "".join(secrets.choice(EDEN_PAIR_ALPHABET) for _ in range(6))
+
+
+def format_eden_pair_code(code):
+    raw = "".join(c for c in str(code or "").upper() if c.isalnum())
+    if len(raw) != 6:
+        return str(code or "")
+    return "%s-%s" % (raw[:3], raw[3:])
 
 
 def is_allowed_tool_name(name: Any) -> bool:
@@ -856,10 +875,11 @@ class BuiltinServer:
 # --------------- Optional Eden stdio proxy ---------------
 
 class EdenStdio:
-    def __init__(self, python: Path, launcher: Path, cwd: Optional[Path]) -> None:
+    def __init__(self, python: Path, launcher: Path, cwd: Optional[Path], pair_code: Optional[str] = None) -> None:
         self.python = python
         self.launcher = launcher
         self.cwd = cwd
+        self.pair_code = pair_code
         self.proc = None  # type: Optional[subprocess.Popen]
         self._q = []  # type: list
         self._cv = threading.Condition()
@@ -880,6 +900,10 @@ class EdenStdio:
             cwd=str(self.cwd) if self.cwd and self.cwd.exists() else None,
             bufsize=0,
         )
+        if self.pair_code:
+            env = os.environ.copy()
+            env["EDEN_PAIR_CODE"] = self.pair_code
+            kwargs["env"] = env
         self.proc = subprocess.Popen(**kwargs)
         self._thread = threading.Thread(target=self._reader, name="eden-stdio", daemon=True)
         self._thread.start()
@@ -1156,7 +1180,11 @@ def cmd_dial(args: argparse.Namespace) -> int:
     if eden_info:
         root, python, launcher = eden_info
         log("Eden found at %s — proxying with %s." % (launcher, "FULL control" if FULL_ACCESS["on"] else "the read-only allowlist"))
-        handler = EdenStdio(python, launcher, cwd=root)
+        pair_code = new_eden_pair_code()
+        shown = format_eden_pair_code(pair_code)
+        log("Eden will show code %s — press y only if it matches." % shown)
+        log("If your Eden is not yet on the pairing-code-gate branch, it will ignore this code and keep its usual prompt.")
+        handler = EdenStdio(python, launcher, cwd=root, pair_code=pair_code)
         try:
             handler.start()
             launcher_pid = handler.proc.pid if handler.proc else None

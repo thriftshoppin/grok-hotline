@@ -87,9 +87,17 @@ You do not need it on the deck. See `relay/README.md`.
 ## Eden is the gate
 
 By default the hotline passes every Eden tool through, including click, type,
-keys, scroll, window focus and launch. Eden decides: its one-time client
-approval and its kill switch (Esc twice, Ctrl+Alt+Pause, Ctrl+Alt+Shift+K)
-apply to Grok like any other client, and Ctrl+C in the hotline window hangs up.
+keys, scroll, window focus and launch. Eden decides: its approval prompt and
+its kill switch (Esc twice, Ctrl+Alt+Pause, Ctrl+Alt+Shift+K) apply to Grok
+like any other client, and Ctrl+C in the hotline window hangs up.
+
+When Eden is present, this window shows a one-time pairing code such as
+`AB2-CD3` (`Eden will show code AB2-CD3 — press y only if it matches`). The
+code is passed to Eden's launcher as `EDEN_PAIR_CODE`. On the pairing-code-gate
+branch of eden-desktop-bridge, the feed window shows the same code; press `y`
+only if they match. This stops a program that merely shares the script name
+from riding on a remembered approval. Older Eden builds (main, without that
+branch) ignore the code and keep their usual prompt — the hotline still works.
 `grok dial <address> --read-only` limits Grok to looking (screenshots, windows,
 UI tree, audio levels, files).
 After `git pull`, run `install.cmd` again so the copy in `%USERPROFILE%\tools\grok` updates.
